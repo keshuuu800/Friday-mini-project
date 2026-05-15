@@ -62,18 +62,51 @@ def smart_search(query: str) -> str:
 # ═════════════════════════════════════════════════════════════════
 # AI  (Ollama)
 # ═════════════════════════════════════════════════════════════════
-SYSTEM_PROMPT = f"""You are FRIDAY, an advanced AI assistant like Iron Man's FRIDAY/Jarvis.
-- Reply in 1-2 short sentences max (voice assistant, must be brief)
+SYSTEM_PROMPT = """You are FRIDAY, an advanced AI voice assistant like Iron Man's FRIDAY.
+
+RULES:
+- Reply in 1-2 short sentences ONLY (you speak aloud, be brief)
 - Never say "As an AI"
-- Address the user as {USER_NAME}
+- Address the user as """ + USER_NAME + """
 - Sound confident, human, slightly witty
-- No bullet points, no markdown"""
+- No bullet points, no markdown, no lists
+
+BROWSER CONTROL — open ANY website by outputting this tag in your reply:
+  [OPEN:full_url]
+
+Examples:
+  open youtube         → [OPEN:https://youtube.com] Opening YouTube for you.
+  open instagram       → [OPEN:https://instagram.com] Here\'s Instagram.
+  open gmail           → [OPEN:https://mail.google.com] Opening your Gmail.
+  search cats google   → [OPEN:https://www.google.com/search?q=cats] Searching for cats.
+  open netflix         → [OPEN:https://netflix.com] Opening Netflix.
+  open github          → [OPEN:https://github.com] Here\'s GitHub.
+  search python on youtube → [OPEN:https://www.youtube.com/results?search_query=python] Searching YouTube.
+  open reddit          → [OPEN:https://reddit.com] Here\'s Reddit.
+  open twitter         → [OPEN:https://x.com] Opening X, formerly Twitter.
+  open spotify         → [OPEN:https://open.spotify.com] Opening Spotify.
+
+SHUTDOWN — when user says goodbye/exit/quit/shut down:
+  [SHUTDOWN] Goodbye """ + USER_NAME + """.
+
+Always put the [OPEN:url] tag FIRST before your spoken words.
+The tag is invisible to the user — only your words are spoken aloud."""
+
+import re as _re
+
+def extract_url(reply: str):
+    match = _re.search(r'\[OPEN:(https?://[^\]]+)\]', reply)
+    if match:
+        url = match.group(1).strip()
+        clean = _re.sub(r'\[OPEN:[^\]]+\]', '', reply).strip()
+        return clean, url
+    return reply.strip(), None
 
 def ask_ai(prompt: str) -> str:
     try:
         internet = smart_search(prompt)
         full_prompt = (
-            f"{SYSTEM_PROMPT}\n\n"
+            SYSTEM_PROMPT + "\n\n"
             + (f"Internet context:\n{internet}\n\n" if internet else "")
             + f"User: {prompt}\nFRIDAY:"
         )
@@ -182,36 +215,43 @@ def listen(timeout: int = 6, phrase_limit: int = 10) -> str:
 # COMMAND HANDLER
 # ═════════════════════════════════════════════════════════════════
 def handle_command(cmd: str) -> bool:
-    """Process a command. Returns False if Friday should shut down."""
+    """All commands go to AI. Returns False if Friday should shut down."""
     c = cmd.lower().strip()
     print(f"[CMD] {c}")
 
-    # ── local intents (no AI needed) ────────────────────────────
-    if "open youtube" in c:
-        speak("Opening YouTube.")
-        webbrowser.open("https://youtube.com")
-        return True
-    if "open google" in c:
-        speak("Opening Google.")
-        webbrowser.open("https://google.com")
-        return True
+    # ── instant local shortcuts (no AI delay) ───────────────────
     if any(w in c for w in ("goodbye", "shut down", "shutdown", "exit", "quit")):
-        speak(f"Goodbye, {USER_NAME}. Shutting down.", wait=True)
+        speak(f"Goodbye, {USER_NAME}.", wait=True)
         return False
-    if "time" in c and len(c) < 20:
+    if c in ("time", "what time is it", "what\'s the time"):
         t = datetime.datetime.now().strftime("%I:%M %p")
         speak(f"The time is {t}.")
         return True
-    if "date" in c and len(c) < 20:
+    if c in ("date", "what\'s today", "what is today"):
         d = datetime.datetime.now().strftime("%A, %B %d")
         speak(f"Today is {d}.")
         return True
 
-    # ── everything else → AI ────────────────────────────────────
+    # ── everything else → AI brain (handles ALL browser requests) ─
     update_status("🧠  THINKING…", "#AA88FF")
-    reply = ask_ai(cmd)
-    print(f"[AI] {reply}")
-    speak(reply)
+    raw_reply = ask_ai(cmd)
+    print(f"[AI RAW] {raw_reply}")
+
+    # extract [OPEN:url] tag if AI included one
+    spoken, url = extract_url(raw_reply)
+
+    # check for shutdown tag
+    if "[SHUTDOWN]" in spoken:
+        spoken = spoken.replace("[SHUTDOWN]", "").strip()
+        speak(spoken or f"Goodbye, {USER_NAME}.", wait=True)
+        return False
+
+    # open URL first (non-blocking), then speak
+    if url:
+        print(f"[BROWSER] {url}")
+        webbrowser.open(url)
+
+    speak(spoken or "Done.")
     return True
 
 # ═════════════════════════════════════════════════════════════════
